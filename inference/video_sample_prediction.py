@@ -1,20 +1,12 @@
-import numpy as np
-import torch
 import torchvision.transforms as transforms
 import torchvision.models as models
 import torch.nn as nn
 import cv2
 from tqdm import tqdm
 import os
-# -*- coding: utf-8 -*-
 import torch
 import numpy as np
-from generate_summary import generate_summary
-from evaluation_metrics import evaluate_summary
 from layers.summarizer import PGL_SUM
-from os import listdir
-from os.path import isfile, join
-import h5py
 import json
 import argparse
 
@@ -48,11 +40,9 @@ class VideoSamplePrediction:
             video_frames_path = video_data_path + "/video_frames"
             video_frames_path = os.path.join(current_dir, video_frames_path)
 
-        os.makedirs(video_data_path)
         if not os.path.exists(video_data_path):
             os.makedirs(video_data_path)
 
-        os.makedirs(video_frames_path)
         if not os.path.exists(video_frames_path):
             os.makedirs(video_frames_path)
 
@@ -64,6 +54,12 @@ class VideoSamplePrediction:
         cap = cv2.VideoCapture(self.video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        progress_bar = tqdm(total=total_frames,
+                            desc='Extracting Frames',
+                            position=0,
+                            leave=True,
+                            bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]')
+
         for frame_number in range(total_frames):
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
@@ -72,9 +68,9 @@ class VideoSamplePrediction:
             if ret:
                 frame_path = os.path.join(self.video_frames_path, f"frame_{frame_number:05d}.jpg")
                 cv2.imwrite(frame_path, frame)
-                print(f"Frame {frame_number}/{total_frames} saved as {frame_path}")
-            else:
-                print(f"Frame {frame_number}/{total_frames} cannot be read")
+                progress_bar.update(1)
+
+        progress_bar.close()
 
         cap.release()
 
@@ -108,7 +104,7 @@ class VideoSamplePrediction:
         total_frames = len(loaded_frames)
 
         progress_bar = tqdm(total=total_frames,
-                            desc='Extracting Frames',
+                            desc='Extracting Features',
                             position=0,
                             leave=True,
                             bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]')
@@ -157,7 +153,7 @@ if __name__ == "__main__":
 
     args = vars(parser.parse_args())
     video_path = args["video_path"]
-    model_path = args["pretrained_weights_path"]
+    model_path = args["model_path"]
     output_folder_path = args["output_folder_path"]
 
     video_sample_loader = VideoSamplePrediction(video_path=video_path, output_folder_path=output_folder_path or "")
@@ -167,12 +163,12 @@ if __name__ == "__main__":
     trained_model = PGL_SUM(input_size=1024, output_size=1024, num_segments=4, heads=8,
                             fusion="add", pos_enc="absolute")
 
-    trained_model.load_state_dict(torch.load(model_path))
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    trained_model.load_state_dict(torch.load(model_path, map_location=device))
 
-    scores = video_sample_loader.predict(video_features, trained_model)
+    scores = video_sample_loader.predict(torch.tensor(video_features), trained_model)
 
     print(scores)
-    print(scores.shape)
 
     # TODO:
     #  1. Generate Summary
